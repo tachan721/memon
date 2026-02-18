@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Gemi-Note Ver 4.7</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root {
+    --bg: #1e1e1e; --grid: #333; --text: #eee;
+    --box-bg: #2d2d2d; --box-bd: #444;
+    --grp-bd: #555; --grp-hd: rgba(255,255,255,0.1); --grp-txt: #eee;
+    --line: #888; --sel: #2196f3; --del: #d32f2f;
+    --handle: #fff; --halo: #1e1e1e;
+    --selection-box: rgba(33, 150, 243, 0.2); --selection-border: rgba(33, 150, 243, 0.6);
+  }
+  [data-theme="light"] {
+    --bg: #f8f9fa; --grid: #e9ecef; --text: #333;
+    --box-bg: #ffffff; --box-bd: #ccc;
+    --grp-bd: #bbb; --grp-hd: rgba(0,0,0,0.08); --grp-txt: #000;
+    --line: #999; --handle: #333; --halo: #f8f9fa;
+  }
+
+  * { box-sizing: border-box; user-select: none; -webkit-user-select: none; outline: none; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font-family: sans-serif; transition: 0.3s; }
+  #app { width: 100vw; height: 100vh; position: relative; overflow: hidden; touch-action: none; }
+
+  .canvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(var(--grid) 1px, transparent 1px) 0 0 / 24px 24px;
+    transform-origin: 0 0; will-change: transform; touch-action: none;
+  }
+  .selection-rect { position: fixed; border: 1px solid var(--selection-border); background: var(--selection-box); pointer-events: none; z-index: 9999; }
+
+  .group { position: absolute; border: 2px dashed var(--grp-bd); border-radius: 6px; display: flex; flex-direction: column; pointer-events: none; z-index: 10; }
+  .group.sel { border-style: solid; border-color: var(--sel); z-index: 15; }
+  .group-header { height: 28px; display: flex; align-items: center; padding: 0 8px; font-size: 12px; font-weight: bold; cursor: grab; pointer-events: auto; background: var(--grp-hd); border-radius: 4px 4px 0 0; color: var(--grp-txt); }
+
+  svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 20; }
+  .line-hit { stroke: transparent; stroke-width: 24px; fill: none; cursor: pointer; pointer-events: stroke; }
+  .line-halo { stroke: var(--halo); stroke-width: 6px; fill: none; pointer-events: none; }
+  .line-main { stroke-width: 3px; fill: none; pointer-events: none; transition: stroke 0.2s; }
+  .line-sel .line-main { stroke-width: 4px; stroke: var(--sel) !important; filter: drop-shadow(0 0 2px var(--sel)); }
+
+  .box { position: absolute; border: 1px solid var(--box-bd); border-radius: 8px; background: var(--box-bg); box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; flex-direction: column; z-index: 30; }
+  .box.sel { border-color: var(--sel); box-shadow: 0 0 0 2px var(--sel); z-index: 40; }
+  .box-head { height: 24px; background: rgba(128,128,128,0.15); border-radius: 7px 7px 0 0; cursor: grab; }
+  .box-body { padding: 8px; flex: 1; display: flex; position: relative; overflow: hidden; }
+
+  textarea { border: none; resize: none; width: 100%; height: 100%; background: transparent; color: inherit; font-family: inherit; font-size: 14px; pointer-events: auto; }
+  input.bare { background: transparent; border: 1px solid var(--sel); color: inherit; width: 100%; font-size: 12px; pointer-events: auto; }
+  img, video { width: 100%; height: 100%; object-fit: contain; pointer-events: auto; display: block; }
+  iframe { width: 100%; height: 100%; border: none; pointer-events: auto; }
+  .click-shield { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 35; cursor: pointer; }
+
+  .port { width: 24px; height: 24px; border-radius: 50%; position: absolute; top: 50%; transform: translateY(-50%); z-index: 100; cursor: crosshair; pointer-events: auto; display: flex; align-items: center; justify-content: center; }
+  .port::after { content: ''; display: block; width: 10px; height: 10px; background: #888; border: 2px solid var(--box-bg); border-radius: 50%; transition: 0.2s; }
+  .port:hover::after { transform: scale(1.5); background: var(--sel); }
+  .port.in { left: -12px; } .port.out { right: -12px; }
+
+  .handle { position: absolute; width: 14px; height: 14px; background: var(--handle); border: 1px solid var(--sel); pointer-events: auto; border-radius: 50%; z-index: 100; }
+  .h-nw { top: -7px; left: -7px; cursor: nw-resize; } .h-se { bottom: -7px; right: -7px; cursor: se-resize; }
+  .h-ne { top: -7px; right: -7px; cursor: ne-resize; } .h-sw { bottom: -7px; left: -7px; cursor: sw-resize; }
+
+  .ui { position: fixed; top: 16px; left: 16px; z-index: 500; display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { background: var(--box-bg); color: var(--text); border: 1px solid var(--box-bd); padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+  .btn:hover { background: var(--grp-hd); }
+  .save-status { position: fixed; top: 16px; right: 16px; font-size: 12px; color: #888; z-index: 500; pointer-events: none; }
+
+  .mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 900; }
+  .sidebar { position: fixed; top: 0; left: 0; height: 100%; width: 280px; background: var(--bg); z-index: 901; border-right: 1px solid var(--box-bd); transform: translateX(-100%); transition: 0.2s; padding: 16px; display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar.open { transform: translateX(0); }
+  
+  .tree-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .file-item { padding: 8px; border-radius: 4px; display: flex; align-items: center; gap: 8px; cursor: pointer; border: 1px solid transparent; transition: 0.1s; }
+  .file-item:hover { background: var(--grp-hd); }
+  .file-item.active { border-color: var(--sel); background: var(--grp-hd); }
+  .file-item.folder-drag-over { background: rgba(33, 150, 243, 0.3); border: 2px dashed var(--sel); }
+  .file-item input { pointer-events: auto; }
+  .root-drop-zone { padding: 10px; border: 2px dashed var(--line); text-align: center; font-size: 12px; color: var(--line); margin-bottom: 10px; border-radius: 4px; }
+  .root-drop-zone.hover { border-color: var(--sel); color: var(--sel); background: var(--grp-hd); }
+
+  .dot { width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(128,128,128,0.5); transition: transform 0.1s; }
+  .dot:hover { transform: scale(1.1); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo } = React;
+
+const PALETTES = {
+  dark:  ['#424242', '#7f4a4a', '#4a7f4a', '#4a5e7f', '#7f7f4a', '#6a4a7f'], 
+  light: ['#ffffff', '#ffccd5', '#ccffcc', '#cce5ff', '#fff5cc', '#e6ccff']
+};
+const LINE_COLORS = {
+  dark:  ['#999999', '#ff6b6b', '#69f0ae', '#64b5f6', '#fff176', '#e040fb'],
+  light: ['#888888', '#d32f2f', '#388e3c', '#1976d2', '#fbc02d', '#7b1fa2']
+};
+
+const genId = (p) => p + '-' + Date.now() + '-' + Math.floor(Math.random()*100000);
+
+function App() {
+  const [state, setState] = useState(() => {
+    try {
+      const keys = ['gemi-note-v4.7', 'gemi-note-v4.6', 'gemi-note-v4.5', 'gemi-note-v4.4'];
+      let loaded = null;
+      for (const k of keys) {
+        const item = localStorage.getItem(k);
+        if (item) { loaded = JSON.parse(item); break; }
+      }
+
+      const repairData = (data) => {
+        if (!data) return { boxes:[], groups:[], lines:[] };
+        const fix = (item, w, h) => ({ ...item, x: item.x||100, y: item.y||100, w: item.w||w, h: item.h||h });
+        return {
+          boxes: (data.boxes||[]).map(b => fix(b, 160, 100)),
+          groups: (data.groups||[]).map(g => fix(g, 300, 200)),
+          lines: (data.lines||[]).filter(l => l.from && l.to)
+        };
+      };
+
+      if (loaded && loaded.files && loaded.order && loaded.order.length > 0) {
+        if (loaded.curId && loaded.files[loaded.curId]) {
+            loaded.files[loaded.curId].data = repairData(loaded.files[loaded.curId].data);
+        }
+        Object.keys(loaded.files).forEach(k => { if(!loaded.files[k].parentId) loaded.files[k].parentId = 'root'; });
+        
+        return {
+            store: loaded,
+            canvas: loaded.files[loaded.curId]?.data || { boxes:[], groups:[], lines:[] },
+            history: [loaded.files[loaded.curId]?.data || { boxes:[], groups:[], lines:[] }],
+            historyPtr: 0
+        };
+      }
+    } catch (e) { console.error("Load failed", e); }
+
+    const id = genId('f');
+    const f = { title: 'New Note', type: 'file', parentId: 'root', data: { boxes: [], groups: [], lines: [] } };
+    const initStore = { files: { [id]: f }, order: [id], curId: id, theme: 'dark', expanded: {} };
+    return { store: initStore, canvas: f.data, history: [f.data], historyPtr: 0 };
+  });
+
+  const { store, canvas, history, historyPtr } = state;
+  const setStore = (v) => setState(p => ({ ...p, store: typeof v === 'function' ? v(p.store) : v }));
+  const setCanvas = (v) => setState(p => {
+      const newCanvas = typeof v === 'function' ? v(p.canvas) : v;
+      return { ...p, canvas: newCanvas };
+  });
+  // Helper to sync and set state securely
+  const setAll = (newStore, newCanvas) => {
+      setState(p => ({ 
+          ...p, 
+          store: newStore, 
+          canvas: newCanvas, 
+          history: [newCanvas], 
+          historyPtr: 0 
+      }));
+  };
+
+  const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
+  const [saveStatus, setSaveStatus] = useState("Ready");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sel, setSel] = useState([]); 
+  const [drag, setDrag] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [dragFile, setDragFile] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+
+  useEffect(() => { document.documentElement.setAttribute('data-theme', store.theme); }, [store.theme]);
+
+  // Auto-save
+  useEffect(() => {
+    if (!store.curId) return;
+    setSaveStatus("Saving...");
+    const t = setTimeout(() => {
+      const nextStore = { ...store, files: { ...store.files, [store.curId]: { ...store.files[store.curId], data: canvas } } };
+      localStorage.setItem('gemi-note-v4.7', JSON.stringify(nextStore));
+      setSaveStatus("Saved");
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [canvas, store]);
+
+  // --- Core Actions ---
+  
+  // Switch File
+  const switchFile = (targetId) => {
+      if(targetId === store.curId) return;
+      // Save current
+      const currentFiles = { ...store.files, [store.curId]: { ...store.files[store.curId], data: canvas } };
+      const nextFile = currentFiles[targetId];
+      // Switch
+      setAll({ ...store, files: currentFiles, curId: targetId }, nextFile.data);
+      setSel([]);
+  };
+
+  // Create
+  const createNewFile = () => {
+    const id = genId('f');
+    const f = { title: 'New Note', type: 'file', parentId: 'root', data: { boxes: [], groups: [], lines: [] } };
+    const currentFiles = { ...store.files, [store.curId]: { ...store.files[store.curId], data: canvas } };
+    setAll({ ...store, files: { ...currentFiles, [id]: f }, order: [id, ...store.order], curId: id }, f.data);
+    setSel([]);
+  };
+
+  const createFolder = () => {
+      const id = genId('d');
+      const f = { title: 'New Folder', type: 'folder', parentId: 'root' };
+      setStore(s => ({ ...s, files: { ...s.files, [id]: f }, order: [id, ...s.order] }));
+  };
+
+  // Delete File/Folder logic
+  const deleteNode = (e, id) => {
+      e.stopPropagation();
+      if(!confirm("削除しますか？")) return;
+
+      const newOrder = store.order.filter(x => x !== id);
+      const newFiles = { ...store.files };
+      delete newFiles[id];
+
+      // If we deleted the current file, we must switch
+      let nextId = store.curId;
+      let nextCanvas = canvas;
+      let didSwitch = false;
+
+      if (id === store.curId) {
+          didSwitch = true;
+          if (newOrder.length === 0) {
+              // Create fallback
+              const newId = genId('f');
+              const newFile = { title: 'New Note', type: 'file', parentId: 'root', data: { boxes: [], groups: [], lines: [] } };
+              newFiles[newId] = newFile;
+              newOrder.push(newId);
+              nextId = newId;
+              nextCanvas = newFile.data;
+          } else {
+              // Find next available file (not folder) to open?
+              // Simple: just open the first one in order that is a file. 
+              // If only folders left, create a file.
+              const firstFile = newOrder.find(oid => newFiles[oid].type === 'file');
+              if(firstFile) {
+                  nextId = firstFile;
+                  nextCanvas = newFiles[nextId].data;
+              } else {
+                  const newId = genId('f');
+                  const newFile = { title: 'New Note', type: 'file', parentId: 'root', data: { boxes: [], groups: [], lines: [] } };
+                  newFiles[newId] = newFile;
+                  newOrder.push(newId);
+                  nextId = newId;
+                  nextCanvas = newFile.data;
+              }
+          }
+      }
+
+      if (didSwitch) {
+          setAll({ ...store, files: newFiles, order: newOrder, curId: nextId }, nextCanvas);
+          setSel([]);
+      } else {
+          // Just update store
+          setStore({ ...store, files: newFiles, order: newOrder });
+      }
+  };
+
+  const exportData = () => {
+      const currentStore = { ...store, files: { ...store.files, [store.curId]: { ...store.files[store.curId], data: canvas } } };
+      const blob = new Blob([JSON.stringify(currentStore)], {type: "application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=`gemi-backup-${Date.now()}.json`;
+      a.click(); URL.revokeObjectURL(url);
+  };
+  const importData = () => {
+      const input = document.createElement('input'); input.type='file'; input.accept='.json';
+      input.onchange = e => {
+          const file = e.target.files[0];
+          if(!file) return;
+          const reader = new FileReader();
+          reader.onload = ev => {
+              try {
+                  const data = JSON.parse(ev.target.result);
+                  if(data.files && data.order) {
+                      setAll(data, data.files[data.curId].data);
+                      alert("Import Successful!");
+                  } else alert("Invalid format");
+              } catch(err) { alert("Error"); }
+          };
+          reader.readAsText(file);
+      };
+      input.click();
+  };
+
+  // --- Canvas Logic ---
+  const pushHistory = (newState) => {
+    const newHistory = history.slice(0, historyPtr + 1);
+    newHistory.push(newState); if (newHistory.length > 50) newHistory.shift();
+    setState(p => ({ ...p, canvas: newState, history: newHistory, historyPtr: newHistory.length - 1 }));
+  };
+  const undo = () => { if (historyPtr > 0) setState(p => ({ ...p, historyPtr: p.historyPtr - 1, canvas: p.history[p.historyPtr - 1] })); };
+  const redo = () => { if (historyPtr < history.length - 1) setState(p => ({ ...p, historyPtr: p.historyPtr + 1, canvas: p.history[p.historyPtr + 1] })); };
+
+  useEffect(() => {
+    const el = document.getElementById('app');
+    const handleWheel = (e) => {
+      if (e.ctrlKey || e.shiftKey) {
+        e.preventDefault();
+        const rect = el.getBoundingClientRect(), mx = e.clientX-rect.left, my = e.clientY-rect.top;
+        const delta = -e.deltaY, factor = 0.05, dir = Math.sign(delta);
+        const s = Math.min(5, Math.max(0.1, view.scale * (1 + dir * factor)));
+        const nx = mx - (mx - view.x) * (s / view.scale);
+        const ny = my - (my - view.y) * (s / view.scale);
+        setView({ x: nx, y: ny, scale: s });
+      } else { e.preventDefault(); setView(p => ({ ...p, x: p.x - e.deltaX, y: p.y - e.deltaY })); }
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [view]);
+
+  const sortedGroups = useMemo(() => [...canvas.groups].sort((a,b)=>(b.w*b.h)-(a.w*a.h)), [canvas.groups]);
+  const sortedBoxes = useMemo(() => [...canvas.boxes].sort((a,b)=>(a.z||0)-(b.z||0)), [canvas.boxes]);
+  const getPort = (id, isIn) => {
+    const b = canvas.boxes.find(x => x.id === id); if (b) return { x: isIn ? b.x : b.x + b.w, y: b.y + b.h / 2 };
+    const g = canvas.groups.find(x => x.id === id); if (g) return { x: isIn ? g.x : g.x + g.w, y: g.y + g.h / 2 };
+    return null;
+  };
+  const getPath = (x1, y1, x2, y2) => { const d = Math.max(Math.abs(x2-x1)*0.5, 60); return `M ${x1} ${y1} C ${x1+d} ${y1}, ${x2-d} ${y2}, ${x2} ${y2}`; };
+  const getEmbedUrl = (url) => { try { const m = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/); return (m && m[2].length === 11) ? `https://www.youtube.com/embed/${m[2]}` : null; } catch(e) { return null; } };
+  const isSelected = (type, id) => sel.some(s => s.type === type && s.id === id);
+
+  const addItem = (type) => {
+    const id = Date.now(), cx = (-view.x+window.innerWidth/2)/view.scale, cy = (-view.y+window.innerHeight/2)/view.scale;
+    let newData = { ...canvas };
+    if (type === 'group') {
+      newData.groups = [...newData.groups, { id, x: cx-150, y: cy-100, w: 300, h: 200, title: 'Group', cIdx: 1 }];
+    } else {
+      let content = "", w = 160, h = 100;
+      if (type !== 'text') {
+          content = prompt(`${type} URL`, type==='image'?"https://picsum.photos/300/200":""); if (!content) return;
+          if (type==='video') { w=320; h=180; } else if (type==='image') { w=200; h=150; } else if (type==='audio') { w=300; h=60; }
+      }
+      newData.boxes = [...newData.boxes, { id, x: cx, y: cy, w, h, type, content, cIdx: 0, z: Math.max(0,...newData.boxes.map(b=>b.z||0))+1 }];
+    }
+    pushHistory(newData);
+  };
+
+  const duplicateItem = () => {
+    if (sel.length === 0) return;
+    const now = Date.now(); let newData = { ...canvas };
+    sel.forEach((s, idx) => {
+        const newId = now + idx;
+        if (s.type === 'box') { const b = canvas.boxes.find(x => x.id === s.id); if(b) newData.boxes.push({ ...b, id: newId, x: b.x+20, y: b.y+20, z: Math.max(0,...newData.boxes.map(z=>z.z||0))+1 }); }
+        else if (s.type === 'group') { const g = canvas.groups.find(x => x.id === s.id); if(g) newData.groups.push({ ...g, id: newId, x: g.x+20, y: g.y+20 }); }
+    });
+    pushHistory(newData);
+  };
+
+  const delItem = (e) => {
+    if(e) { e.preventDefault(); e.stopPropagation(); }
+    if (sel.length === 0) return;
+    let newData = { ...canvas };
+    const selIds = new Set(sel.map(s => s.id));
+    newData.lines = newData.lines.filter(l => !selIds.has(l.id) && !selIds.has(l.from) && !selIds.has(l.to));
+    newData.boxes = newData.boxes.filter(b => !selIds.has(b.id));
+    newData.groups = newData.groups.filter(g => !selIds.has(g.id));
+    pushHistory(newData); setSel([]);
+  };
+
+  const setColor = (idx) => {
+    if (sel.length === 0) return;
+    let newData = { ...canvas };
+    sel.forEach(s => {
+        if(s.type === 'line') newData.lines = newData.lines.map(l => l.id === s.id ? { ...l, cIdx: idx } : l);
+        else if(s.type === 'group') newData.groups = newData.groups.map(g => g.id === s.id ? { ...g, cIdx: idx } : g);
+        else newData.boxes = newData.boxes.map(b => b.id === s.id ? { ...b, cIdx: idx } : b);
+    });
+    pushHistory(newData);
+  };
+
+  const handleDown = (e, mode, id, extra) => {
+    if (e.buttons === 4 || (e.shiftKey && e.buttons === 1 && mode==='canvas')) {
+      setDrag({ mode: 'pan', sx: e.clientX, sy: e.clientY, ix: view.x, iy: view.y }); return;
+    }
+    if (menuOpen) return; // Menu Guard
+
+    e.stopPropagation(); e.target.setPointerCapture(e.pointerId);
+    if (editing) setEditing(null);
+
+    if (mode === 'canvas') {
+        if (!e.shiftKey) setSel([]); 
+        setDrag({ mode: 'select', sx: e.clientX, sy: e.clientY, cx: e.clientX, cy: e.clientY, keep: e.shiftKey }); return;
+    }
+
+    if (['box', 'group', 'line'].includes(mode)) {
+        if (e.shiftKey) { if (isSelected(mode, id)) setSel(p => p.filter(s => s.id !== id)); else setSel(p => [...p, { type: mode, id }]); }
+        else if (!isSelected(mode, id)) setSel([{ type: mode, id }]);
+        if (mode === 'box') setCanvas(p => ({ ...p, boxes: p.boxes.map(b => b.id === id ? { ...b, z: Math.max(0,...p.boxes.map(z=>z.z||0))+1 } : b) }));
+    }
+
+    if (mode === 'port') { setDrag({ mode: 'line', from: id }); return; }
+
+    const tType = (mode.includes('group')) ? 'groups' : 'boxes';
+    if(mode.startsWith('resize')) {
+        const t = canvas[tType].find(x => x.id === id);
+        if(t) setDrag({ mode: mode, id, dir: extra, sx: e.clientX, sy: e.clientY, ix: t.x, iy: t.y, iw: t.w, ih: t.h, targetType: tType });
+        return;
+    }
+
+    if (['box', 'group'].includes(mode)) { 
+        let children = [];
+        if (tType === 'groups') {
+            const target = canvas.groups.find(g => g.id === id);
+            if(target) {
+                const inRect = (c, p) => c.x >= p.x && c.x + c.w <= p.x + p.w && c.y >= p.y && c.y + c.h <= p.y + p.h;
+                canvas.boxes.forEach(b => { if(inRect(b, target)) children.push({k:'boxes', id:b.id}) });
+                canvas.groups.forEach(g => { if(g.id!==id && inRect(g, target)) children.push({k:'groups', id:g.id}) });
+            }
+        }
+        setDrag({ mode: 'move', sx: e.clientX, sy: e.clientY, children }); 
+    }
+  };
+
+  const handleMove = (e) => {
+    if (!drag) return;
+    const dx = (e.clientX - drag.sx)/view.scale, dy = (e.clientY - drag.sy)/view.scale;
+    if (drag.mode === 'pan') { setView(p => ({ ...p, x: drag.ix + (e.clientX - drag.sx), y: drag.iy + (e.clientY - drag.sy) })); return; }
+    if (drag.mode === 'line' || drag.mode === 'select') { setDrag(p => ({ ...p, cx: e.clientX, cy: e.clientY })); return; }
+
+    if (drag.mode.startsWith('resize')) {
+      let nx = drag.ix, ny = drag.iy, nw = drag.iw, nh = drag.ih;
+      if (drag.dir.includes('e')) nw = Math.max(50, drag.iw + dx); 
+      if (drag.dir.includes('s')) nh = Math.max(50, drag.ih + dy);
+      if (drag.dir.includes('w')) { nw = Math.max(50, drag.iw - dx); nx = drag.ix + (drag.iw - nw); }
+      if (drag.dir.includes('n')) { nh = Math.max(50, drag.ih - dy); ny = drag.iy + (drag.ih - nh); }
+      setCanvas(p => ({ ...p, [drag.targetType]: p[drag.targetType].map(x => x.id === drag.id ? { ...x, x: nx, y: ny, w: nw, h: nh } : x) }));
+      return;
+    }
+
+    if (drag.mode === 'move') {
+        const ids = new Set(sel.map(s => s.id));
+        const childBoxIds = new Set(), childGrpIds = new Set();
+        if(drag.children) {
+            drag.children.forEach(c => {
+                if(!ids.has(c.id)) { if(c.k==='boxes') childBoxIds.add(c.id); else childGrpIds.add(c.id); }
+            });
+        }
+        setCanvas(prev => {
+            const nextBoxes = prev.boxes.map(b => (ids.has(b.id) || childBoxIds.has(b.id)) ? { ...b, x: b.x + dx, y: b.y + dy } : b);
+            const nextGroups = prev.groups.map(g => (ids.has(g.id) || childGrpIds.has(g.id)) ? { ...g, x: g.x + dx, y: g.y + dy } : g);
+            return { ...prev, boxes: nextBoxes, groups: nextGroups };
+        });
+        setDrag(p => ({ ...p, sx: e.clientX, sy: e.clientY }));
+    }
+  };
+
+  const handleUp = (e) => {
+    if (!drag) return;
+    if (drag.mode === 'select') {
+        const left = Math.min(drag.sx, drag.cx), top = Math.min(drag.sy, drag.cy);
+        const w = Math.abs(drag.sx - drag.cx), h = Math.abs(drag.sy - drag.cy);
+        const cx1 = (left - view.x)/view.scale, cy1 = (top - view.y)/view.scale;
+        const cx2 = (left+w - view.x)/view.scale, cy2 = (top+h - view.y)/view.scale;
+        const newSel = [];
+        canvas.boxes.forEach(b => { if (b.x>=cx1 && b.x+b.w<=cx2 && b.y>=cy1 && b.y+b.h<=cy2) newSel.push({type:'box',id:b.id}); });
+        canvas.groups.forEach(g => { if (g.x>=cx1 && g.x+g.w<=cx2 && g.y>=cy1 && g.y+g.h<=cy2) newSel.push({type:'group',id:g.id}); });
+        setSel(drag.keep ? [...sel, ...newSel.filter(n=>!sel.some(s=>s.id===n.id))] : newSel);
+    } 
+    else if (drag.mode === 'line') {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const port = el?.closest('.port.in');
+      if (port) {
+        const p = port.closest('.box') || port.closest('.group');
+        if (p) {
+            const to = Number(p.dataset.id || p.getAttribute('data-id'));
+            if (to && to !== drag.from && !canvas.lines.find(l => l.from === drag.from && l.to === to)) {
+              pushHistory({ ...canvas, lines: [...canvas.lines, { id: Date.now(), from: drag.from, to, cIdx: 0 }] });
+            }
+        }
+      }
+    } else if (['move', 'resize-group', 'resize-box'].includes(drag.mode) || drag.mode.startsWith('resize')) {
+        pushHistory(canvas);
+    }
+    setDrag(null);
+  };
+
+  const spaceKey = useRef(false);
+  useEffect(() => {
+    const k = e => { 
+        if (e.code === 'Space') spaceKey.current = e.type === 'keydown'; 
+        if (e.type === 'keydown') {
+            if (['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+            if (e.key === 'Delete' || e.key === 'Backspace') delItem(e);
+            if ((e.ctrlKey||e.metaKey) && e.key === 'd') { e.preventDefault(); duplicateItem(); }
+            if ((e.ctrlKey||e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+            if (((e.ctrlKey||e.metaKey) && e.key === 'y') || ((e.ctrlKey||e.metaKey) && e.shiftKey && e.key === 'z')) { e.preventDefault(); redo(); }
+        }
+    };
+    window.addEventListener('keydown', k); window.addEventListener('keyup', k);
+    return () => { window.removeEventListener('keydown', k); window.removeEventListener('keyup', k); };
+  }, [sel, canvas, history, historyPtr]);
+
+  // Folder Logic
+  const handleFileDragStart = (e, id) => { setDragFile(id); };
+  const handleFileDrop = (e, targetFolderId) => {
+      e.stopPropagation();
+      if(dragFile && dragFile !== targetFolderId) {
+          const newFiles = { ...store.files, [dragFile]: { ...store.files[dragFile], parentId: targetFolderId } };
+          const newStore = { ...store, files: newFiles };
+          setStore(newStore); saveToStorage(newStore);
+          setDragFile(null); setDropTarget(null);
+      }
+  };
+  const toggleFolder = (id, e) => { e.stopPropagation(); setStore(s => ({ ...s, expanded: { ...s.expanded, [id]: !s.expanded[id] } })); };
+
+  const renderTree = (parentId) => {
+      const items = store.order.filter(id => (store.files[id]?.parentId || 'root') === parentId);
+      if (items.length === 0) return null;
+      return items.map(id => {
+          const f = store.files[id];
+          if (!f) return null;
+          if (f.type === 'folder') {
+              const isOpen = store.expanded[id];
+              return (
+                  <div key={id} style={{ marginLeft: parentId==='root'?0:16 }}>
+                      <div className={`file-item ${dropTarget===id ? 'folder-drag-over' : ''}`} onDragOver={e => { e.preventDefault(); setDropTarget(id); }} onDragLeave={() => setDropTarget(null)} onDrop={e => handleFileDrop(e, id)} onClick={(e) => toggleFolder(id, e)}>
+                          <span style={{ fontSize:10 }}>{isOpen ? '📂' : '📁'}</span>
+                          {editing?.id === id ? 
+                              <input autoFocus value={f.title} onClick={e=>e.stopPropagation()} onBlur={()=>setEditing(null)} onKeyDown={e=>e.key==='Enter'&&setEditing(null)} onChange={e=>setStore(s=>({...s, files:{...s.files, [id]:{...f, title:e.target.value}}}))} />
+                              : <span onDoubleClick={e=>{e.stopPropagation();setEditing({id,type:'folder'})}}>{f.title}</span>}
+                          <span style={{marginLeft:'auto',color:'var(--del)',fontSize:10}} onClick={e=>deleteNode(e,id)}>×</span>
+                      </div>
+                      {isOpen && renderTree(id)}
+                  </div>
+              );
+          } else {
+              return (
+                  <div key={id} className={`file-item ${store.curId === id ? 'active' : ''}`} draggable onDragStart={e => handleFileDragStart(e, id)} style={{ marginLeft: parentId==='root'?0:16 }} onClick={() => switchFile(id)}>
+                      <span>📄</span>
+                      {editing?.id === id ?
+                          <input autoFocus value={f.title} onClick={e=>e.stopPropagation()} onBlur={()=>setEditing(null)} onKeyDown={e=>e.key==='Enter'&&setEditing(null)} onChange={e=>setStore(s=>({...s, files:{...s.files, [id]:{...f, title:e.target.value}}}))} />
+                          : <span onDoubleClick={e=>{e.stopPropagation();setEditing({id,type:'file'})}}>{f.title}</span>}
+                      <span style={{marginLeft:'auto',color:'var(--del)',fontSize:10}} onClick={e=>deleteNode(e,id)}>×</span>
+                  </div>
+              );
+          }
+      });
+  };
+
+  const renderContent = (b) => {
+      const isSel = isSelected('box', b.id);
+      if (b.type === 'video') { const ytUrl = getEmbedUrl(b.content); return <> {ytUrl ? <iframe src={ytUrl} allowFullScreen /> : <video src={b.content} controls />} {!isSel && <div className="click-shield" onPointerDown={e=>handleDown(e,'box',b.id)} />} </>; }
+      if (b.type === 'audio') return <audio src={b.content} controls />;
+      if (b.type === 'image') return <img src={b.content} />;
+      return <textarea value={b.content} onChange={e => setCanvas(p => ({ ...p, boxes: p.boxes.map(x => x.id === b.id ? { ...x, content: e.target.value } : x) }))} onPointerDown={e => e.stopPropagation()} />;
+  };
+
+  return (
+    <div id="app" onPointerMove={handleMove} onPointerUp={handleUp} onPointerDown={e => handleDown(e, 'canvas')}>
+      <div className={`save-status ${saveStatus!=='Saved'?'saving':''}`}>{saveStatus}</div>
+
+      {menuOpen && <div className="mask" onClick={() => setMenuOpen(false)} onPointerDown={e => e.stopPropagation()} />}
+      <div className={`sidebar ${menuOpen ? 'open' : ''}`}>
+        <div style={{ fontWeight: 'bold', marginBottom: 10, display:'flex', gap:4 }}>
+            <button className="btn" style={{flex:1}} onClick={() => createNewFile()}>+ File</button>
+            <button className="btn" style={{flex:1}} onClick={() => createFolder()}>+ Folder</button>
+        </div>
+        <div className={`root-drop-zone ${dropTarget==='root'?'hover':''}`} onDragOver={e=>{e.preventDefault();setDropTarget('root')}} onDragLeave={()=>setDropTarget(null)} onDrop={e=>handleFileDrop(e,'root')}> ← Root </div>
+        <div className="tree-list">{renderTree('root')}</div>
+        <div style={{ marginTop: 10, display:'flex', gap:4 }}>
+            <button className="btn" style={{flex:1, fontSize:10}} onClick={exportData}>↓ Export</button>
+            <button className="btn" style={{flex:1, fontSize:10}} onClick={importData}>↑ Import</button>
+        </div>
+        <button className="btn" style={{ justifyContent: 'center', marginTop: 10 }} onClick={() => setStore(p => ({ ...p, theme: p.theme === 'dark' ? 'light' : 'dark' }))}>Theme</button>
+      </div>
+
+      <div className="ui" onPointerDown={e => e.stopPropagation()}>
+        <button className="btn" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
+        <span style={{ alignSelf: 'center', fontWeight: 'bold' }}>{store.files[store.curId]?.title}</span>
+        <div style={{ width: 16 }}></div>
+        <button className="btn" onClick={() => addItem('text')}>Box</button>
+        <button className="btn" onClick={() => addItem('image')}>Img</button>
+        <button className="btn" onClick={() => addItem('video')}>Vid</button>
+        <button className="btn" onClick={() => addItem('audio')}>Aud</button>
+        <button className="btn" onClick={() => addItem('group')}>Grp</button>
+        {sel.length > 0 && <>
+          <div style={{ width: 1, height: 20, background: '#666', margin: '0 4px' }}></div>
+          {PALETTES[store.theme].map((c, i) => ( <div key={i} className="dot" style={{ background: c }} onPointerDown={e => { e.stopPropagation(); setColor(i); }} /> ))}
+          <button className="btn" style={{ color: 'var(--del)', borderColor: 'var(--del)' }} onClick={delItem}>Del</button>
+        </>}
+      </div>
+
+      {drag?.mode === 'select' && <div className="selection-rect" style={{ left: Math.min(drag.sx, drag.cx), top: Math.min(drag.sy, drag.cy), width: Math.abs(drag.sx - drag.cx), height: Math.abs(drag.sy - drag.cy) }}/>}
+
+      <div className="canvas" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
+        {sortedGroups.map(g => {
+          const isSel = isSelected('group', g.id);
+          return <div key={g.id} data-id={g.id} className={`group ${isSel ? 'sel' : ''}`} style={{ transform: `translate(${g.x}px,${g.y}px)`, width: g.w, height: g.h, borderColor: PALETTES[store.theme][g.cIdx || 0] }}>
+              <div className="port in" onPointerDown={e=>e.stopPropagation()}/>
+              <div className="group-header" style={{ backgroundColor: PALETTES[store.theme][g.cIdx || 0] }} onPointerDown={e => handleDown(e, 'group', g.id)}>
+                {editing?.id === g.id ?
+                  <input className="bare" autoFocus value={g.title} style={{ color: 'inherit' }} onBlur={()=>setEditing(null)} onKeyDown={e=>e.key==='Enter'&&setEditing(null)} onChange={e=>setCanvas(p=>({...p, groups:p.groups.map(x=>x.id===g.id?{...x, title:e.target.value}:x)}))} onPointerDown={e=>e.stopPropagation()} />
+                  : <span style={{ width: '100%' }} onDoubleClick={() => setEditing({ type: 'group', id: g.id })}>{g.title}</span>}
+              </div>
+              <div className="port out" onPointerDown={e => handleDown(e, 'port', g.id)} />
+              {isSel && ['nw', 'ne', 'sw', 'se'].map(d => <div key={d} className={`handle h-${d}`} onPointerDown={e => handleDown(e, 'resize-group', g.id, d)} />)}
+           </div>
+        })}
+        <svg>
+          {canvas.lines.map(l => {
+            const s = getPort(l.from, false), e = getPort(l.to, true);
+            if(!s || !e) return null;
+            const d = getPath(s.x, s.y, e.x, e.y);
+            return <g key={l.id} className={isSelected('line', l.id) ? 'line-sel' : ''} onPointerDown={e => handleDown(e, 'line', l.id)}>
+              <path d={d} className="line-hit" /> <path d={d} className="line-halo" /> <path d={d} className="line-main" stroke={LINE_COLORS[store.theme][l.cIdx || 0]} />
+            </g>;
+          })}
+          {drag?.mode === 'line' && (() => {
+            const s = getPort(drag.from, false); if (!s) return null;
+            const mx = (drag.cx - view.x) / view.scale, my = (drag.cy - view.y) / view.scale;
+            return <path d={getPath(s.x, s.y, mx, my)} stroke="var(--sel)" strokeWidth="3" fill="none" strokeDasharray="5" />;
+          })()}
+        </svg>
+        {sortedBoxes.map(b => {
+          const isSel = isSelected('box', b.id);
+          return <div key={b.id} data-id={b.id} className={`box ${isSel ? 'sel' : ''}`} style={{ transform: `translate(${b.x}px,${b.y}px)`, width: b.w, height: b.h, backgroundColor: PALETTES[store.theme][b.cIdx || 0] }}>
+              <div className="port in" onPointerDown={e => e.stopPropagation()} />
+              <div className="box-head" onPointerDown={e => handleDown(e, 'box', b.id)} />
+              <div className="box-body">{renderContent(b)}</div>
+              <div className="port out" onPointerDown={e => handleDown(e, 'port', b.id)} />
+              {isSel && ['nw', 'ne', 'sw', 'se'].map(d => <div key={d} className={`handle h-${d}`} onPointerDown={e => handleDown(e, 'resize-box', b.id, d)} />)}
+           </div>
+        })}
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
